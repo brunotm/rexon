@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/tidwall/gjson"
@@ -12,30 +11,27 @@ import (
 )
 
 // Parse parses raw data using the specified RexSet
-func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan []byte {
-	rexChan := make(chan []byte)
-	go p.parse(ctx, data, rexChan)
-	return rexChan
+func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan *Result {
+	resultCh := make(chan *Result)
+	go p.parse(ctx, data, resultCh)
+	return resultCh
 }
 
 // ParseBytes parses raw data using the specified RexSetLine
-func (p *RexSet) ParseBytes(ctx context.Context, data []byte) <-chan []byte {
+func (p *RexSet) ParseBytes(ctx context.Context, data []byte) <-chan *Result {
 	return p.Parse(ctx, bytes.NewReader(data))
 }
 
-func (p *RexSet) parse(ctx context.Context, data io.Reader, rexChan chan<- []byte) {
-	defer close(rexChan)
+func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Result) {
+	defer close(resultCh)
+
+	var skip bool
+	result := &Result{}
 	scanner := bufio.NewScanner(data)
 	startTag := p.RexMap[KeyStartTag]
 	dropTag := p.RexMap[KeyDropTag]
 	skipTag := p.RexMap[KeySkipTag]
 	continueTag := p.RexMap[KeyContinueTag]
-
-	var ok bool
-	var skip bool
-	var valid bool
-	var document []byte
-	var valueType ValueType
 
 	for scanner.Scan() {
 		// Trim and prepare if set a prepare regexp
@@ -66,13 +62,14 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, rexChan chan<- []byt
 		}
 
 		// If content is a match for start_tag and document is valid
-		// deliver the document
-		if startTag.Match(line) && valid {
-			if !wrapCtxSend(ctx, document, rexChan) {
-				return
+		// deliver the result
+		if startTag.Match(line) {
+			if result.Data != nil || result.Errors != nil {
+				if !wrapCtxSend(ctx, result, resultCh) {
+					return
+				}
 			}
-			document = nil
-			valid = false
+			result = &Result{}
 		}
 
 		for key := range p.RexMap {
@@ -83,8 +80,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, rexChan chan<- []byt
 			}
 
 			// Continue if we already have a match for this regexp
-			// it should not happen. it is necessary?
-			if gjson.GetBytes(document, key).Exists() {
+			if gjson.GetBytes(result.Data, key).Exists() {
 				continue
 			}
 
@@ -96,63 +92,24 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, rexChan chan<- []byt
 
 			if len(match) > 2 {
 				// Store the result as a [] under the given key if we have multiple matches
-				// For now we don't support type parsing under [] objects, so it will be a []string
-				document, _ = sjson.SetBytes(document, key, match[1:])
-				if !valid {
-					valid = true
-				}
+				// TODO: add support for conversion under json arrays
+				result.Data, _ = sjson.SetBytes(result.Data, key, match[1:])
 				continue
 			}
 
 			// // Only join match groups if keepmv is specified
 			// if p.KeepMV {
 			// 	document, _ = sjson.SetBytes(document, key, bytes.Join(match[1:], []byte(p.KeepMVSep)))
-			// 	if !valid {
-			// 		valid = true
-			// 	}
+			// continue
 			// }
 
-			// If we have a type map prepare for parsing types
-			if p.FieldTypes != nil {
-				// Try to get a specific type for this key
-				valueType, ok = p.FieldTypes[key]
-				if !ok {
-					// Without a specific key, fallback to the catch _all type, if available
-					if valueType, ok = p.FieldTypes[KeyTypeAll]; !ok {
-						// Else just set the resulting string and continue for the next key
-						document, _ = sjson.SetBytes(document, key, match[1])
-						if !valid {
-							valid = true
-						}
-						continue
-					}
-				}
-			} else {
-				// If no field types specified, just set the resulting match
-				document, _ = sjson.SetBytes(document, key, match[1])
-				if !valid {
-					valid = true
-				}
-				continue
-			}
-
-			// Try to parse the match to the specified ValueType
-			if v, err := ParseValue(match[1], valueType, p.Round); err != nil {
-				edocument, _ := sjson.SetBytes([]byte(""), KeyErrorMessage,
-					fmt.Sprintf(parseErrorMessage, key, err.Error()))
-				if !wrapCtxSend(ctx, edocument, rexChan) {
-					return
-				}
-			} else {
-				document, _ = sjson.SetBytes(document, key, v)
-				if !valid {
-					valid = true
-				}
-			}
+			// Set and parse fields
+			parseField(result, key, p.FieldTypes, match[1], p.Round)
 		}
 	}
-	if valid {
-		if !wrapCtxSend(ctx, document, rexChan) {
+
+	if result.Data != nil || result.Errors != nil {
+		if !wrapCtxSend(ctx, result, resultCh) {
 			return
 		}
 	}
