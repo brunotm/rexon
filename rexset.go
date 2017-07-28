@@ -34,6 +34,13 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 	continueTag := p.RexMap[KeyContinueTag]
 
 	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			result := &Result{}
+			result.Errors = append(result.Errors, err)
+			wrapCtxSend(ctx, result, resultCh)
+			return
+		}
+
 		// Trim and prepare if set a prepare regexp
 		line := bytes.TrimSpace(scanner.Bytes())
 		if p.RexPrep != nil {

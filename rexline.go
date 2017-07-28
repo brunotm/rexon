@@ -25,6 +25,13 @@ func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- *Re
 	scanner := bufio.NewScanner(data)
 
 	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			result := &Result{}
+			result.Errors = append(result.Errors, err)
+			wrapCtxSend(ctx, result, resultCh)
+			return
+		}
+
 		var match [][]byte
 		result := &Result{}
 
