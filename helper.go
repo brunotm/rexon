@@ -29,6 +29,11 @@ func RexCompile(rex string) (*regexp.Regexp, error) {
 	return regexp.Compile(rex)
 }
 
+// RexMustCompile wraps regexp.Compile
+func RexMustCompile(rex string) *regexp.Regexp {
+	return regexp.MustCompile(rex)
+}
+
 // wrapCtxSend wraps the sending to a channel with a context
 func wrapCtxSend(ctx context.Context, result *Result, resultCh chan<- *Result) bool {
 	select {
