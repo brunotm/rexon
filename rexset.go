@@ -4,11 +4,64 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"regexp"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// RexSet type
+type RexSet struct {
+	Round int                       // The floating point precision to use when converting to float
+	Prep  *regexp.Regexp            // The regexp used to prepare (ReplaceAll) each line before matching (eg. `[(),;!"']`)
+	Set   map[string]*regexp.Regexp // The set of Field:Regexp
+	Types map[string]ValueType      // The Fields:Type for conversion
+}
+
+// NewSetParser creates a new set parser with the given configuration
+func NewSetParser(prep string, set map[string]string, types map[string]ValueType, round int) (Parser, error) {
+	var err error
+
+	// Check for empty or nil set
+	if len(set) < 1 {
+		return nil, fmt.Errorf("rexson: invalid set %#v", set)
+	}
+
+	// Check if a start tag was provided
+	if _, ok := set[KeyStartTag]; !ok {
+		return nil, fmt.Errorf("rexson: set does not contain a start tag %#v", set)
+	}
+
+	parser := &RexSet{}
+	parser.Round = round
+	parser.Types = types
+
+	parser.Set, err = RexSetCompile(set)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if we're given a prepare regexp and compile
+	if prep != "" {
+		parser.Prep, err = RexCompile(prep)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return parser, nil
+}
+
+// MustSetParser is like NewSetParser but panics on error
+func MustSetParser(prep string, set map[string]string, types map[string]ValueType, round int) Parser {
+	parser, err := NewSetParser(prep, set, types, round)
+	if err != nil {
+		panic(err)
+	}
+	return parser
+}
 
 // Parse parses raw data using the specified RexSet
 func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan *Result {
@@ -28,10 +81,10 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 	var skip bool
 	result := &Result{}
 	scanner := bufio.NewScanner(data)
-	startTag := p.RexMap[KeyStartTag]
-	dropTag := p.RexMap[KeyDropTag]
-	skipTag := p.RexMap[KeySkipTag]
-	continueTag := p.RexMap[KeyContinueTag]
+	startTag := p.Set[KeyStartTag]
+	dropTag := p.Set[KeyDropTag]
+	skipTag := p.Set[KeySkipTag]
+	continueTag := p.Set[KeyContinueTag]
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
@@ -43,8 +96,8 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 
 		// Trim and prepare if set a prepare regexp
 		line := bytes.TrimSpace(scanner.Bytes())
-		if p.RexPrep != nil {
-			line = p.RexPrep.ReplaceAll(line, emptyByte)
+		if p.Prep != nil {
+			line = p.Prep.ReplaceAll(line, emptyByte)
 		}
 
 		// Drop if KeyDropTag is set and match the current line
@@ -79,7 +132,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			result = &Result{}
 		}
 
-		for key := range p.RexMap {
+		for key := range p.Set {
 
 			// Skip control regexps
 			if key == KeyStartTag || key == KeyDropTag || key == KeyContinueTag || key == KeySkipTag {
@@ -92,7 +145,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			}
 
 			// Continue if we don't match this regexp
-			match := p.RexMap[key].FindSubmatch(line)
+			match := p.Set[key].FindSubmatch(line)
 			if match == nil {
 				continue
 			}
@@ -111,7 +164,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			// }
 
 			// Set and parse fields
-			parseField(result, key, p.FieldTypes, match[1], p.Round)
+			parseField(result, key, p.Types, match[1], p.Round)
 		}
 	}
 

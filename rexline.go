@@ -6,7 +6,61 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 )
+
+// RexLine type
+type RexLine struct {
+	Round   int                  // The floating point precision to use when converting to float
+	FindAll bool                 // Find all ocurrences in line
+	Prep    *regexp.Regexp       // The regexp used to prepare (ReplaceAll) each line before matching (eg. `[(),!"]`)
+	Rex     *regexp.Regexp       // The Regexp for match
+	Fields  []string             // The ordered field names
+	Types   map[string]ValueType // The Fields:Type for conversion
+}
+
+// NewLineParser creates a new set parser with the given configuration
+func NewLineParser(prep, rex string, fields []string, findAll bool, types map[string]ValueType, round int) (Parser, error) {
+	var err error
+
+	if rex == "" {
+		return nil, fmt.Errorf("rexson: empty rex")
+	}
+
+	// Check for empty or nil fields
+	if len(fields) < 1 {
+		return nil, fmt.Errorf("rexson: invalid fields %#v", fields)
+	}
+
+	parser := &RexLine{}
+	parser.Round = round
+	parser.Types = types
+	parser.FindAll = findAll
+
+	parser.Rex, err = RexCompile(rex)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if we're given a prepare regexp and compile
+	if prep != "" {
+		parser.Prep, err = RexCompile(prep)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return parser, nil
+}
+
+// MustLineParser is like NewLineParser but panics on error
+func MustLineParser(prep, rex string, fields []string, findAll bool, types map[string]ValueType, round int) Parser {
+	parser, err := NewLineParser(prep, rex, fields, findAll, types, round)
+	if err != nil {
+		panic(err)
+	}
+	return parser
+}
 
 // Parse parses raw data from a io.Reader using the specified RexSetLine
 func (p *RexLine) Parse(ctx context.Context, data io.Reader) <-chan *Result {
@@ -36,8 +90,8 @@ func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- *Re
 		result := &Result{}
 
 		line := bytes.TrimSpace(scanner.Bytes())
-		if p.RexPrep != nil {
-			line = p.RexPrep.ReplaceAll(line, emptyByte)
+		if p.Prep != nil {
+			line = p.Prep.ReplaceAll(line, emptyByte)
 		}
 
 		if p.FindAll {
@@ -75,7 +129,7 @@ func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- *Re
 
 		for i := range match {
 			// Set and parse fields
-			parseField(result, p.Fields[i], p.FieldTypes, match[i], p.Round)
+			parseField(result, p.Fields[i], p.Types, match[i], p.Round)
 		}
 
 		if result.Data != nil || result.Errors != nil {
