@@ -11,6 +11,16 @@ var (
 	emptyByte           = []byte("")
 )
 
+// RexCompile wraps regexp.Compile
+func RexCompile(rex string) (*regexp.Regexp, error) {
+	return regexp.Compile(rex)
+}
+
+// RexMustCompile wraps regexp.Compile
+func RexMustCompile(rex string) *regexp.Regexp {
+	return regexp.MustCompile(rex)
+}
+
 // RexSetCompile compiles a RexSet map
 func RexSetCompile(set map[string]string) (map[string]*regexp.Regexp, error) {
 	rexSet := make(map[string]*regexp.Regexp)
@@ -24,14 +34,13 @@ func RexSetCompile(set map[string]string) (map[string]*regexp.Regexp, error) {
 	return rexSet, nil
 }
 
-// RexCompile wraps regexp.Compile
-func RexCompile(rex string) (*regexp.Regexp, error) {
-	return regexp.Compile(rex)
-}
-
-// RexMustCompile wraps regexp.Compile
-func RexMustCompile(rex string) *regexp.Regexp {
-	return regexp.MustCompile(rex)
+// RexSetMustCompile is like RexSetCompile but panics on error
+func RexSetMustCompile(set map[string]string) map[string]*regexp.Regexp {
+	rexSet, err := RexSetCompile(set)
+	if err != nil {
+		panic(err)
+	}
+	return rexSet
 }
 
 // wrapCtxSend wraps the sending to a channel with a context
