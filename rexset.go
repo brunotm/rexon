@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // RexSet type
@@ -64,22 +61,22 @@ func MustSetParser(prep string, set map[string]string, types map[string]ValueTyp
 }
 
 // Parse parses raw data using the specified RexSet
-func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan *Result {
-	resultCh := make(chan *Result)
+func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan Result {
+	resultCh := make(chan Result)
 	go p.parse(ctx, data, resultCh)
 	return resultCh
 }
 
 // ParseBytes parses raw data using the specified RexSetLine
-func (p *RexSet) ParseBytes(ctx context.Context, data []byte) <-chan *Result {
+func (p *RexSet) ParseBytes(ctx context.Context, data []byte) <-chan Result {
 	return p.Parse(ctx, bytes.NewReader(data))
 }
 
-func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Result) {
+func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- Result) {
 	defer close(resultCh)
 
 	var skip bool
-	result := &Result{}
+	result := Result{}
 	scanner := bufio.NewScanner(data)
 	startTag := p.Set[KeyStartTag]
 	dropTag := p.Set[KeyDropTag]
@@ -88,7 +85,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			result := &Result{}
+			result := Result{}
 			result.Errors = append(result.Errors, err)
 			wrapCtxSend(ctx, result, resultCh)
 			return
@@ -129,7 +126,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 					return
 				}
 			}
-			result = &Result{}
+			result = Result{}
 		}
 
 		for key := range p.Set {
@@ -140,7 +137,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			}
 
 			// Continue if we already have a match for this regexp
-			if gjson.GetBytes(result.Data, key).Exists() {
+			if JSONExists(result.Data, key) {
 				continue
 			}
 
@@ -153,7 +150,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			if len(match) > 2 {
 				// Store the result as a [] under the given key if we have multiple matches
 				// TODO: add support for conversion under json arrays
-				result.Data, _ = sjson.SetBytes(result.Data, key, match[1:])
+				result.Data, _ = JSONSet(result.Data, match[1:], key)
 				continue
 			}
 
@@ -164,7 +161,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- *Res
 			// }
 
 			// Set and parse fields
-			parseField(result, key, p.Types, match[1], p.Round)
+			result = parseFieldValue(result, key, p.Types, match[1], p.Round)
 		}
 	}
 

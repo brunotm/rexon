@@ -44,7 +44,7 @@ func RexSetMustCompile(set map[string]string) map[string]*regexp.Regexp {
 }
 
 // wrapCtxSend wraps the sending to a channel with a context
-func wrapCtxSend(ctx context.Context, result *Result, resultCh chan<- *Result) bool {
+func wrapCtxSend(ctx context.Context, result Result, resultCh chan<- Result) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -54,10 +54,6 @@ func wrapCtxSend(ctx context.Context, result *Result, resultCh chan<- *Result) b
 }
 
 func getFieldType(field string, fieldTypes map[string]ValueType) (ValueType, bool) {
-
-	if fieldTypes == nil {
-		return "", false
-	}
 
 	// Return the specified ValueType
 	if valueType, exists := fieldTypes[field]; exists {
@@ -69,5 +65,5 @@ func getFieldType(field string, fieldTypes map[string]ValueType) (ValueType, boo
 		return valueType, exists
 	}
 
-	return "", false
+	return TypeUnknown, false
 }

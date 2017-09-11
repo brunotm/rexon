@@ -2,7 +2,6 @@ package rexon
 
 import (
 	"encoding/json"
-	"reflect"
 	"strconv"
 	"unsafe"
 
@@ -27,6 +26,12 @@ const (
 func JSONGet(data []byte, path ...string) ([]byte, ValueType, error) {
 	dt, tp, _, err := jsonparser.Get(data, path...)
 	return dt, tp, err
+}
+
+// JSONExists check if the given path exists
+func JSONExists(data []byte, path ...string) bool {
+	_, _, _, err := jsonparser.Get(data, path...)
+	return err != jsonparser.KeyPathNotFoundError
 }
 
 // JSONGetInt fetch the given path as a int64
@@ -73,17 +78,33 @@ func JSONSetRawBytes(data []byte, value []byte, path ...string) ([]byte, error) 
 	return jsonparser.Set(data, value, path...)
 }
 
-// JSONSet parses and set the given value for the provided path
+// JSONSet parses and set the given value for the provided path.
+// byte slices will be set as string, value is already a parsed type use JSONSetRawBytes instead
 func JSONSet(data []byte, value interface{}, path ...string) ([]byte, error) {
 	var res []byte
 	var err error
 	var str string
 
+	// Creates a JSON if we're given a nil or empty []byte
+	if len(data) == 0 {
+		data = make([]byte, 0, 512)
+		data = append(data, '{', '}')
+	}
+
 	switch v := value.(type) {
 	case []byte:
-		return JSONSetRawBytes(data, v, path...)
+		sz := len(v) + 2
+		res = make([]byte, sz, sz)
+		res = append(res, '"')
+		res = append(res, v...)
+		res = append(res, '"')
+		return JSONSetRawBytes(data, res, path...)
 	case string:
-		str = strconv.Quote(v)
+		if mustMarshalString(v) {
+			res, _ = json.Marshal(v)
+			return JSONSetRawBytes(data, res, path...)
+		}
+		str = `"` + v + `"`
 	case bool:
 		if v {
 			str = "true"
@@ -119,12 +140,14 @@ func JSONSet(data []byte, value interface{}, path ...string) ([]byte, error) {
 		return JSONSetRawBytes(data, res, path...)
 	}
 
-	strHdr := (*reflect.StringHeader)(unsafe.Pointer(&str))
-	byteHdr := (*reflect.SliceHeader)(unsafe.Pointer(&res))
-	byteHdr.Data = strHdr.Data
-	l := len(str)
-	byteHdr.Len = l
-	byteHdr.Cap = l
+	// strHdr := (*reflect.StringHeader)(unsafe.Pointer(&str))
+	// byteHdr := (*reflect.SliceHeader)(unsafe.Pointer(&res))
+	// byteHdr.Data = strHdr.Data
+	// l := len(str)
+	// byteHdr.Len = l
+	// byteHdr.Cap = l
+
+	res = []byte(str)
 
 	return JSONSetRawBytes(data, res, path...)
 }
@@ -134,4 +157,13 @@ func CopyBytes(data []byte) []byte {
 	b := make([]byte, len(data))
 	copy(b, data)
 	return b
+}
+
+func mustMarshalString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < ' ' || s[i] > 0x7f || s[i] == '"' {
+			return true
+		}
+	}
+	return false
 }

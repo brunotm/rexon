@@ -5,24 +5,19 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // ParseJsonValues parses values in a []byte encoded json document to the type specified type
 // for each key in the fieldTypes argument. Ommited fields will resort to the KeyTypeAll type
 // if specified, else the current value and type will remain unaltered.
-func ParseJsonValues(b []byte, fieldTypes map[string]ValueType, round int) *Result {
-
-	result := &Result{}
-	jsonResult := gjson.ParseBytes(b)
+func ParseJsonValues(data []byte, fieldTypes map[string]ValueType, round int) Result {
+	result := Result{}
 
 	// Iterate over document key and values for
-	jsonResult.ForEach(func(key, value gjson.Result) bool {
+	JSONForEach(data, func(key string, value []byte, tp ValueType) error {
 		// Set and parse fields
-		parseField(result, key.String(), fieldTypes, []byte(value.String()), round)
-		return true
+		result = parseFieldValue(result, key, fieldTypes, value, round)
+		return nil
 	})
 
 	return result
@@ -86,9 +81,7 @@ func ParseSize(str string, unit Unit) (float64, error) {
 // The round argument is only used when the ValueType is TypeFloat.
 func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
 	switch t {
-	case TypeInt:
-		return strconv.ParseInt(string(b), 10, 64)
-	case TypeFloat:
+	case TypeNumber:
 		return parseFloat64(string(b), round)
 	case TypeBool:
 		return strconv.ParseBool(string(b))
@@ -99,7 +92,7 @@ func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
 	}
 }
 
-func parseField(result *Result, field string, fieldTypes map[string]ValueType, match []byte, round int) {
+func parseFieldValue(result Result, field string, fieldTypes map[string]ValueType, match []byte, round int) Result {
 	// If we have a type map prepare for parsing types
 	if fieldType, ok := getFieldType(field, fieldTypes); ok {
 
@@ -111,17 +104,18 @@ func parseField(result *Result, field string, fieldTypes map[string]ValueType, m
 				result.Errors,
 				fmt.Errorf("rexon: error parsing key %s to %s: %s", field, fieldType, err))
 
-			result.Data, _ = sjson.SetBytes(result.Data, field, nil)
+			result.Data, _ = JSONSet(result.Data, nil, field)
 
 		} else {
-
-			result.Data, _ = sjson.SetBytes(result.Data, field, value)
+			result.Data, _ = JSONSet(result.Data, value, field)
 		}
 	} else {
 
 		// If no field types specified, just set the resulting match
-		result.Data, _ = sjson.SetBytes(result.Data, field, match)
+		result.Data, _ = JSONSet(result.Data, match, field)
 	}
+
+	return result
 }
 
 // parseFloat64 parses a string into a float64 rounding it to the round precision

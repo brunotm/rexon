@@ -11,14 +11,6 @@ const (
 	KeyContinueTag = "_continue_tag"
 	// KeyTypeAll identifies in RexLine/Set.FieldTypes the catch all type for type parsing (TypeInt, TypeFloat, TypeBool, TypeString)
 	KeyTypeAll = "_all"
-	// TypeInt identifies in RexLine/Set.FieldTypes that the given field should be parsed to int
-	TypeInt ValueType = "int"
-	// TypeFloat identifies in RexLine/Set.FieldTypes that the given field should be parsed to float
-	TypeFloat ValueType = "float"
-	// TypeBool identifies in RexLine/Set.FieldTypes that the given field should be parsed to bool
-	TypeBool ValueType = "bool"
-	// TypeString identifies in RexLine/Set.FieldTypes that the given field should be parsed to string
-	TypeString ValueType = "string"
 	// Bytes bytes
 	Bytes = Unit(1)
 	// KBytes KiloBytes

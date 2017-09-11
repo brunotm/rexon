@@ -63,31 +63,31 @@ func MustLineParser(prep, rex string, fields []string, findAll bool, types map[s
 }
 
 // Parse parses raw data from a io.Reader using the specified RexSetLine
-func (p *RexLine) Parse(ctx context.Context, data io.Reader) <-chan *Result {
-	resultCh := make(chan *Result)
+func (p *RexLine) Parse(ctx context.Context, data io.Reader) <-chan Result {
+	resultCh := make(chan Result)
 	go p.parse(ctx, data, resultCh)
 	return resultCh
 }
 
 // ParseBytes parses raw data from a []byte using the specified RexSetLine
-func (p *RexLine) ParseBytes(ctx context.Context, data []byte) <-chan *Result {
+func (p *RexLine) ParseBytes(ctx context.Context, data []byte) <-chan Result {
 	return p.Parse(ctx, bytes.NewReader(data))
 }
 
-func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- *Result) {
+func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- Result) {
 	defer close(resultCh)
 	scanner := bufio.NewScanner(data)
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			result := &Result{}
+			result := Result{}
 			result.Errors = append(result.Errors, err)
 			wrapCtxSend(ctx, result, resultCh)
 			return
 		}
 
 		var match [][]byte
-		result := &Result{}
+		result := Result{}
 
 		line := bytes.TrimSpace(scanner.Bytes())
 		if p.Prep != nil {
@@ -129,7 +129,7 @@ func (p *RexLine) parse(ctx context.Context, data io.Reader, resultCh chan<- *Re
 
 		for i := range match {
 			// Set and parse fields
-			parseField(result, p.Fields[i], p.Types, match[i], p.Round)
+			result = parseFieldValue(result, p.Fields[i], p.Types, match[i], p.Round)
 		}
 
 		if result.Data != nil || result.Errors != nil {
