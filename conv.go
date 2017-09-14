@@ -1,10 +1,12 @@
 package rexon
 
 import (
+	"bytes"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
-	"strings"
+	"unsafe"
 )
 
 // ParseJsonValues parses values in a []byte encoded json document to the type specified type
@@ -23,20 +25,62 @@ func ParseJsonValues(data []byte, fieldTypes map[string]ValueType, round int) Re
 	return result
 }
 
-// ParseSize parses a human readble string data size notation like `10.5M`
-// to the given unit b/kb/mb/gb/tb/pb/eb/kib/mib/gib/tib/pib/eib
-func ParseSize(str string, unit Unit) (float64, error) {
-	// Prepare string and match against the given string
-	str = strings.TrimSpace(str)
-	str = strings.ToLower(str)
+func parseFieldValue(result Result, field string, fieldTypes map[string]ValueType, match []byte, round int) Result {
+	// If we have a type map prepare for parsing types
+	if fieldType, ok := getFieldType(field, fieldTypes); ok {
 
-	match := rexParseSize.FindStringSubmatch(str)
+		// Try to parse the match to the specified ValueType
+		if value, err := parseValue(match, fieldType, round); err != nil {
+
+			// Append parse error to result.Errors and set field to null
+			result.Errors = append(
+				result.Errors,
+				fmt.Errorf("rexon: error parsing key %s to %s: %s", field, fieldType, err))
+
+			result.Data, _ = JSONSet(result.Data, nil, field)
+
+		} else {
+			result.Data, _ = JSONSet(result.Data, value, field)
+		}
+	} else {
+
+		// If no field types specified, just set the resulting match
+		result.Data, _ = JSONSet(result.Data, match, field)
+	}
+
+	return result
+}
+
+// parseValue parses the given []byte to the specified ValueType.
+// The round argument is only used when the ValueType is TypeFloat.
+func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
+	switch t {
+	case TypeNumber:
+		return parseFloat64(*(*string)(unsafe.Pointer(&b)), round)
+	case TypeBool:
+		return strconv.ParseBool(*(*string)(unsafe.Pointer(&b)))
+	case TypeString:
+		return *(*string)(unsafe.Pointer(&b)), nil
+	default:
+		return nil, fmt.Errorf("unknow type %s", t)
+	}
+}
+
+// ParseSize parses a human readble byte string data size notation like `10.5M`
+// to the given unit b/kb/mb/gb/tb/pb/eb/kib/mib/gib/tib/pib/eib
+func ParseSize(b []byte, unit Unit) (float64, error) {
+	// Prepare string and match against the given string
+
+	b = bytes.TrimSpace(b)
+	b = bytes.ToLower(b)
+
+	match := rexParseSize.FindSubmatch(b)
 	if match == nil {
-		return 0, fmt.Errorf("rexon: could not match string for parsing: %s", str)
+		return 0, fmt.Errorf("rexon: could not match string for parsing: %s", string(b))
 	}
 
 	// Parse the number part to float
-	value, err := parseFloat64(match[1], -1)
+	value, err := parseFloat64(*(*string)(unsafe.Pointer(&match[1])), -1)
 	if err != nil {
 		return 0, fmt.Errorf("rexon: %s", err)
 	}
@@ -77,50 +121,17 @@ func ParseSize(str string, unit Unit) (float64, error) {
 	return float64(valueUnit / unit), nil
 }
 
-// parseValue parses the given []byte to the specified ValueType.
-// The round argument is only used when the ValueType is TypeFloat.
-func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
-	switch t {
-	case TypeNumber:
-		return parseFloat64(string(b), round)
-	case TypeBool:
-		return strconv.ParseBool(string(b))
-	case TypeString:
-		return string(b), nil
-	default:
-		return nil, fmt.Errorf("unknow type %s", t)
-	}
-}
-
-func parseFieldValue(result Result, field string, fieldTypes map[string]ValueType, match []byte, round int) Result {
-	// If we have a type map prepare for parsing types
-	if fieldType, ok := getFieldType(field, fieldTypes); ok {
-
-		// Try to parse the match to the specified ValueType
-		if value, err := parseValue(match, fieldType, round); err != nil {
-
-			// Append parse error to result.Errors and set field to null
-			result.Errors = append(
-				result.Errors,
-				fmt.Errorf("rexon: error parsing key %s to %s: %s", field, fieldType, err))
-
-			result.Data, _ = JSONSet(result.Data, nil, field)
-
-		} else {
-			result.Data, _ = JSONSet(result.Data, value, field)
-		}
-	} else {
-
-		// If no field types specified, just set the resulting match
-		result.Data, _ = JSONSet(result.Data, match, field)
-	}
-
-	return result
+// ParseSizeString is like ParseSize but accepts a string argument
+func ParseSizeString(s string, unit Unit) (float64, error) {
+	shdr := *(*reflect.StringHeader)(unsafe.Pointer(&s))
+	bhdr := reflect.SliceHeader{Data: shdr.Data, Len: shdr.Len, Cap: shdr.Len}
+	bv := *(*[]byte)(unsafe.Pointer(&bhdr))
+	return ParseSize(bv, unit)
 }
 
 // parseFloat64 parses a string into a float64 rounding it to the round precision
-func parseFloat64(str string, r int) (float64, error) {
-	f, err := strconv.ParseFloat(str, 64)
+func parseFloat64(s string, r int) (float64, error) {
+	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return 0, err
 	}
