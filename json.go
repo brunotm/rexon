@@ -2,6 +2,7 @@ package rexon
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strconv"
 	"unicode/utf8"
@@ -24,10 +25,38 @@ const (
 	TypeUnknown  ValueType = jsonparser.Unknown
 )
 
+var (
+	errorTypeNotImplemented = errors.New("rexon: type Not implemented")
+)
+
 // JSONGet the []byte for the given path
 func JSONGet(data []byte, path ...string) ([]byte, ValueType, error) {
 	dt, tp, _, err := jsonparser.Get(data, path...)
 	return dt, tp, err
+}
+
+// JSONGetValue returns the parsed value for a given path as an interface
+func JSONGetValue(data []byte, path ...string) (interface{}, ValueType, error) {
+	b, tp, err := JSONGet(data, path...)
+	if err != nil {
+		return nil, TypeUnknown, err
+	}
+
+	switch tp {
+	case TypeNull:
+		return nil, tp, err
+	case TypeNumber:
+		value, err := jsonparser.ParseFloat(b)
+		return value, tp, err
+	case TypeString:
+		value, err := jsonparser.ParseString(b)
+		return value, tp, err
+	case TypeBool:
+		value, err := jsonparser.ParseBoolean(b)
+		return value, tp, err
+	default:
+		return b, tp, nil
+	}
 }
 
 // JSONExists check if the given path exists
