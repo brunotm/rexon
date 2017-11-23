@@ -4,76 +4,76 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"regexp"
 )
 
 // RexSet type
 type RexSet struct {
-	Round int                       // The floating point precision to use when converting to float
-	Prep  *regexp.Regexp            // The regexp used to prepare (ReplaceAll) each line before matching (eg. `[(),;!"']`)
+	Round int                       // The floating point precision to parse numbers
+	Prep  *regexp.Regexp            // The regexp used to strip unwanted stuff (eg. `[(),;!"']`) before matching
 	Set   map[string]*regexp.Regexp // The set of Field:Regexp
-	Types map[string]ValueType      // The Fields:Type for conversion
+	Types map[string]ValueType      // The Field:Type map for conversions
 }
 
 // NewSetParser creates a new set parser with the given configuration
-func NewSetParser(prep string, set map[string]string, types map[string]ValueType, round int) (Parser, error) {
-	var err error
-
-	// Check for empty or nil set
-	if len(set) < 1 {
-		return nil, fmt.Errorf("rexson: invalid set %#v", set)
+func NewSetParser() *RexSet {
+	return &RexSet{
+		Set:   make(map[string]*regexp.Regexp),
+		Types: make(map[string]ValueType),
 	}
-
-	// Check if a start tag was provided
-	if _, ok := set[KeyStartTag]; !ok {
-		return nil, fmt.Errorf("rexson: set does not contain a start tag %#v", set)
-	}
-
-	parser := &RexSet{}
-	parser.Round = round
-	parser.Types = types
-
-	parser.Set, err = RexSetCompile(set)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if we're given a prepare regexp and compile
-	if prep != "" {
-		parser.Prep, err = RexCompile(prep)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return parser, nil
 }
 
-// MustSetParser is like NewSetParser but panics on error
-func MustSetParser(prep string, set map[string]string, types map[string]ValueType, round int) Parser {
-	parser, err := NewSetParser(prep, set, types, round)
-	if err != nil {
-		panic(err)
-	}
-	return parser
+// AddRex to the current parser
+func (p *RexSet) AddRex(key, rex string, valueType ValueType) {
+	p.Set[key] = regexp.MustCompile(rex)
+	p.Types[key] = valueType
+}
+
+// SetPrep to the current parser
+func (p *RexSet) SetPrep(rex string) {
+	p.Prep = regexp.MustCompile(rex)
+}
+
+// SetStartTag to the current parser
+func (p *RexSet) SetStartTag(rex string) {
+	p.Set[KeyStartTag] = regexp.MustCompile(rex)
+}
+
+// SetDropTag to the current parser
+func (p *RexSet) SetDropTag(rex string) {
+	p.Set[KeyDropTag] = regexp.MustCompile(rex)
+}
+
+// SetSkipTag to the current parser
+func (p *RexSet) SetSkipTag(rex string) {
+	p.Set[KeySkipTag] = regexp.MustCompile(rex)
+}
+
+// SetContinueTag to the current parser
+func (p *RexSet) SetContinueTag(rex string) {
+	p.Set[KeyContinueTag] = regexp.MustCompile(rex)
+}
+
+// SetRound default rounding used for number parsing
+func (p *RexSet) SetRound(round int) {
+	p.Round = round
 }
 
 // Parse parses raw data using the specified RexSet
-func (p *RexSet) Parse(ctx context.Context, data io.Reader) <-chan Result {
+func (p *RexSet) Parse(ctx context.Context, data io.Reader) (results <-chan Result) {
 	resultCh := make(chan Result)
 	go p.parse(ctx, data, resultCh)
 	return resultCh
 }
 
 // ParseBytes parses raw data using the specified RexSetLine
-func (p *RexSet) ParseBytes(ctx context.Context, data []byte) <-chan Result {
+func (p *RexSet) ParseBytes(ctx context.Context, data []byte) (results <-chan Result) {
 	return p.Parse(ctx, bytes.NewReader(data))
 }
 
-func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- Result) {
-	defer close(resultCh)
+func (p *RexSet) parse(ctx context.Context, data io.Reader, results chan<- Result) {
+	defer close(results)
 
 	var skip bool
 	result := Result{}
@@ -87,7 +87,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- Resu
 		if err := scanner.Err(); err != nil {
 			result := Result{}
 			result.Errors = append(result.Errors, err)
-			wrapCtxSend(ctx, result, resultCh)
+			wrapCtxSend(ctx, result, results)
 			return
 		}
 
@@ -122,7 +122,7 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- Resu
 		// deliver the result
 		if startTag.Match(line) {
 			if result.Data != nil || result.Errors != nil {
-				if !wrapCtxSend(ctx, result, resultCh) {
+				if !wrapCtxSend(ctx, result, results) {
 					return
 				}
 			}
@@ -154,19 +154,13 @@ func (p *RexSet) parse(ctx context.Context, data io.Reader, resultCh chan<- Resu
 				continue
 			}
 
-			// // Only join match groups if keepmv is specified
-			// if p.KeepMV {
-			// 	document, _ = sjson.SetBytes(document, key, bytes.Join(match[1:], []byte(p.KeepMVSep)))
-			// continue
-			// }
-
 			// Set and parse fields
 			result = parseFieldValue(result, key, p.Types, match[1], p.Round)
 		}
 	}
 
 	if result.Data != nil || result.Errors != nil {
-		if !wrapCtxSend(ctx, result, resultCh) {
+		if !wrapCtxSend(ctx, result, results) {
 			return
 		}
 	}
