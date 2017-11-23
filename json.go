@@ -30,73 +30,72 @@ var (
 )
 
 // JSONGet the []byte for the given path
-func JSONGet(data []byte, path ...string) ([]byte, ValueType, error) {
-	dt, tp, _, err := jsonparser.Get(data, path...)
-	return dt, tp, err
+func JSONGet(data []byte, path ...string) (value []byte, valueType ValueType, err error) {
+	value, valueType, _, err = jsonparser.Get(data, path...)
+	return value, valueType, err
 }
 
 // JSONGetValue returns the parsed value for a given path as an interface
-func JSONGetValue(data []byte, path ...string) (interface{}, ValueType, error) {
-	b, tp, err := JSONGet(data, path...)
+func JSONGetValue(data []byte, path ...string) (value interface{}, valueType ValueType, err error) {
+	var buf []byte
+	buf, valueType, err = JSONGet(data, path...)
 	if err != nil {
 		return nil, TypeUnknown, err
 	}
 
-	switch tp {
+	switch valueType {
 	case TypeNull:
-		return nil, tp, err
+		value = nil
 	case TypeNumber:
-		value, err := jsonparser.ParseFloat(b)
-		return value, tp, err
+		value, err = jsonparser.ParseFloat(buf)
 	case TypeString:
-		value, err := jsonparser.ParseString(b)
-		return value, tp, err
+		value, err = jsonparser.ParseString(buf)
 	case TypeBool:
-		value, err := jsonparser.ParseBoolean(b)
-		return value, tp, err
+		value, err = jsonparser.ParseBoolean(buf)
 	default:
-		return b, tp, nil
+		value = buf
 	}
+	return value, valueType, err
 }
 
 // JSONExists check if the given path exists
-func JSONExists(data []byte, path ...string) bool {
+func JSONExists(data []byte, path ...string) (exists bool) {
 	_, _, _, err := jsonparser.Get(data, path...)
 	return err != jsonparser.KeyPathNotFoundError
 }
 
 // JSONGetInt fetch the given path as a int64
-func JSONGetInt(data []byte, path ...string) (int64, error) {
+func JSONGetInt(data []byte, path ...string) (value int64, err error) {
 	return jsonparser.GetInt(data, path...)
 }
 
 // JSONGetFloat fetch the given path as a float64
-func JSONGetFloat(data []byte, path ...string) (float64, error) {
+func JSONGetFloat(data []byte, path ...string) (value float64, err error) {
 	return jsonparser.GetFloat(data, path...)
 }
 
 // JSONGetString fetch the given path as a string
-func JSONGetString(data []byte, path ...string) (string, error) {
+func JSONGetString(data []byte, path ...string) (value string, err error) {
 	return jsonparser.GetString(data, path...)
 }
 
 // JSONGetUnsafeString fetch the given path as a unsafe string string
-func JSONGetUnsafeString(data []byte, path ...string) (string, error) {
+func JSONGetUnsafeString(data []byte, path ...string) (value string, err error) {
 	return jsonparser.GetUnsafeString(data, path...)
 }
 
 // JSONGetBool fetch the given path as a bool
-func JSONGetBool(data []byte, path ...string) (bool, error) {
+func JSONGetBool(data []byte, path ...string) (value bool, err error) {
 	return jsonparser.GetBoolean(data, path...)
 }
 
 // JSONDelete deletes the value for the given path
-func JSONDelete(data []byte, path ...string) []byte {
+func JSONDelete(data []byte, path ...string) (d []byte) {
 	return jsonparser.Delete(data, path...)
 }
 
 // JSONForEach applies the given func to every key/value pair in the json data
-func JSONForEach(data []byte, cb func(key string, value []byte, tp ValueType) error, keys ...string) error {
+func JSONForEach(data []byte, cb func(key string, value []byte, tp ValueType) error, keys ...string) (err error) {
 
 	iter := func(key []byte, value []byte, tp ValueType, offset int) error {
 		return cb(*(*string)(unsafe.Pointer(&key)), value, tp)
@@ -105,14 +104,13 @@ func JSONForEach(data []byte, cb func(key string, value []byte, tp ValueType) er
 }
 
 // JSONSetRawBytes set the given []byte value for the provided path
-func JSONSetRawBytes(data []byte, value []byte, path ...string) ([]byte, error) {
+func JSONSetRawBytes(data []byte, value []byte, path ...string) (d []byte, err error) {
 	return jsonparser.Set(data, value, path...)
 }
 
 // JSONSet parses and set the given value for the provided path.
 // byte slices will be set as string, value is already a parsed type use JSONSetRawBytes instead
-func JSONSet(data []byte, value interface{}, path ...string) ([]byte, error) {
-	var err error
+func JSONSet(data []byte, value interface{}, path ...string) (d []byte, err error) {
 	buf := make([]byte, 0, 8)
 
 	// Creates a JSON if we're given a nil or empty []byte
@@ -123,8 +121,6 @@ func JSONSet(data []byte, value interface{}, path ...string) ([]byte, error) {
 
 	switch v := value.(type) {
 	case []byte:
-		// v = bytes.TrimSpace(v)
-		// buf = parseString(*(*string)(unsafe.Pointer(&v)), false)
 		buf = marshalByteString(v, false)
 	case string:
 		shdr := *(*reflect.StringHeader)(unsafe.Pointer(&v))
@@ -165,10 +161,10 @@ func JSONSet(data []byte, value interface{}, path ...string) ([]byte, error) {
 }
 
 // CopyBytes copies a give []byte
-func CopyBytes(data []byte) []byte {
-	b := make([]byte, len(data))
-	copy(b, data)
-	return b
+func CopyBytes(data []byte) (d []byte) {
+	d = make([]byte, len(data))
+	copy(d, data)
+	return d
 }
 
 // String below serialization functionality adapted from encoding/json
