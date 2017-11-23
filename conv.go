@@ -12,20 +12,18 @@ import (
 // ParseJsonValues parses values in a []byte encoded json document to the type specified type
 // for each key in the fieldTypes argument. Ommited fields will resort to the KeyTypeAll type
 // if specified, else the current value and type will remain unaltered.
-func ParseJsonValues(data []byte, fieldTypes map[string]ValueType, round int) Result {
-	result := Result{}
-
+func ParseJsonValues(data []byte, fieldTypes map[string]ValueType, round int) (r Result) {
 	// Iterate over document key and values for
-	JSONForEach(data, func(key string, value []byte, tp ValueType) error {
+	JSONForEach(data, func(key string, value []byte, tp ValueType) (err error) {
 		// Set and parse fields
-		result = parseFieldValue(result, key, fieldTypes, value, round)
+		r = parseFieldValue(r, key, fieldTypes, value, round)
 		return nil
 	})
 
-	return result
+	return r
 }
 
-func parseFieldValue(result Result, field string, fieldTypes map[string]ValueType, match []byte, round int) Result {
+func parseFieldValue(result Result, field string, fieldTypes map[string]ValueType, match []byte, round int) (r Result) {
 	// If we have a type map prepare for parsing types
 	if fieldType, ok := getFieldType(field, fieldTypes); ok {
 
@@ -53,7 +51,10 @@ func parseFieldValue(result Result, field string, fieldTypes map[string]ValueTyp
 
 // parseValue parses the given []byte to the specified ValueType.
 // The round argument is only used when the ValueType is TypeFloat.
-func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
+func parseValue(b []byte, t ValueType, round int) (value interface{}, err error) {
+	if b == nil || string(b) == "null" {
+		return nil, nil
+	}
 	switch t {
 	case TypeNumber:
 		return parseFloat64(*(*string)(unsafe.Pointer(&b)), round)
@@ -68,7 +69,7 @@ func parseValue(b []byte, t ValueType, round int) (interface{}, error) {
 
 // ParseSize parses a human readble byte string data size notation like `10.5M`
 // to the given unit b/kb/mb/gb/tb/pb/eb/kib/mib/gib/tib/pib/eib
-func ParseSize(b []byte, unit Unit) (float64, error) {
+func ParseSize(b []byte, unit Unit) (size float64, err error) {
 	// Prepare string and match against the given string
 
 	b = bytes.TrimSpace(b)
@@ -122,7 +123,7 @@ func ParseSize(b []byte, unit Unit) (float64, error) {
 }
 
 // ParseSizeString is like ParseSize but accepts a string argument
-func ParseSizeString(s string, unit Unit) (float64, error) {
+func ParseSizeString(s string, unit Unit) (size float64, err error) {
 	shdr := *(*reflect.StringHeader)(unsafe.Pointer(&s))
 	bhdr := reflect.SliceHeader{Data: shdr.Data, Len: shdr.Len, Cap: shdr.Len}
 	bv := *(*[]byte)(unsafe.Pointer(&bhdr))
@@ -130,8 +131,8 @@ func ParseSizeString(s string, unit Unit) (float64, error) {
 }
 
 // parseFloat64 parses a string into a float64 rounding it to the round precision
-func parseFloat64(s string, r int) (float64, error) {
-	f, err := strconv.ParseFloat(s, 64)
+func parseFloat64(s string, r int) (f float64, err error) {
+	f, err = strconv.ParseFloat(s, 64)
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +144,7 @@ func parseFloat64(s string, r int) (float64, error) {
 }
 
 // Round a float to the specified precision
-func Round(f float64, round int) float64 {
+func Round(f float64, round int) (n float64) {
 	shift := math.Pow(10, float64(round))
 	return math.Floor((f*shift)+.5) / shift
 }
