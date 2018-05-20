@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/brunotm/jsonparser"
+	"github.com/buger/jsonparser"
 )
 
 func newJSON() (data []byte) {
