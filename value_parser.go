@@ -159,6 +159,11 @@ func ToFormat(format string) (opt ValueOpt) {
 	}
 }
 
+// Name returns this value name
+func (v *Value) Name() (name string) {
+	return v.name
+}
+
 // Parse extracts the value from the given []byte and its type using the configured parameters
 func (v *Value) Parse(b []byte) (value interface{}, ok bool, err error) {
 	if v.regex == nil {
