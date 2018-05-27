@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
@@ -16,104 +15,108 @@ var (
 	errInvalidParsersNumber = fmt.Errorf("invalid number of matches and parsers")
 )
 
-// Rex type
-type Rex struct {
-	multiLine    bool
-	TrimSpaces   bool
-	StartTag     *regexp.Regexp
-	StopTag      *regexp.Regexp
-	SkipTag      *regexp.Regexp
-	ContinueTag  *regexp.Regexp
-	Regexp       *regexp.Regexp
-	ValueParsers []*ValueParser `json:"value_parsers"`
+// make sure we satisfy the rexon.ParserInterface
+var _ DataParser = (*Parser)(nil)
+
+// Parser type
+type Parser struct {
+	multiLine   bool
+	trimSpaces  bool
+	startTag    *regexp.Regexp
+	stopTag     *regexp.Regexp
+	skipTag     *regexp.Regexp
+	continueTag *regexp.Regexp
+	regex       *regexp.Regexp
+	values      []*Value
 }
 
-// UnmarshalJSON creates a new parser from the JSON encoded configuration
-func (p *Rex) UnmarshalJSON(data []byte) (err error) {
-	type alias Rex
-	aux := &struct {
-		*alias
-		StartTag    string `json:"start_tag"`
-		StopTag     string `json:"stop_tag"`
-		SkipTag     string `json:"skip_tag"`
-		ContinueTag string `json:"continue_tag"`
-		Regexp      string `json:"regexp"`
-	}{
-		alias: (*alias)(p),
-	}
+// ParserOpt functional options for Parser
+type ParserOpt func(*Parser) (err error)
 
-	if err := json.Unmarshal(data, &aux); err != nil {
+// NewParser creates a new Parser
+func NewParser(values []*Value, options ...ParserOpt) (p *Parser, err error) {
+	p = &Parser{}
+	p.startTag = rexDefaultStartTag
+
+	for _, opt := range options {
+		if err = opt(p); err != nil {
+			return nil, err
+		}
+	}
+	p.values = values
+	return p, nil
+}
+
+// MustNewParser is like NewParser but panics on error
+func MustNewParser(values []*Value, options ...ParserOpt) (p *Parser) {
+	p, err := NewParser(values, options...)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
+// TrimSpaces trims right and left trailing spaces
+func TrimSpaces() (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		p.trimSpaces = true
+		return nil
+	}
+}
+
+// LineRegex sets a regexp for this parser making the extraction to work in line mode and ignore all Values regexps.
+// Working in line mode is much faster than in Set using Value regexp.
+// Multiline regexps `(?m)` are still valid, but usually are slower than using Values regexps.
+func LineRegex(expr string) (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		regex, err := regexp.Compile(expr)
+		p.regex = regex
 		return err
 	}
-
-	if aux.StartTag != "" {
-		p.StartTag, err = regexp.Compile(aux.StartTag)
-		if err != nil {
-			return err
-		}
-	} else {
-		p.StartTag = rexDefaultStartTag
-	}
-
-	if aux.StopTag != "" {
-		p.StopTag, err = regexp.Compile(aux.StopTag)
-		if err != nil {
-			return err
-		}
-
-	}
-	if aux.SkipTag != "" {
-		p.SkipTag, err = regexp.Compile(aux.SkipTag)
-		if err != nil {
-			return err
-		}
-	}
-	if aux.ContinueTag != "" {
-		p.ContinueTag, err = regexp.Compile(aux.ContinueTag)
-		if err != nil {
-			return err
-		}
-	}
-
-	if aux.Regexp != "" {
-		p.Regexp, err = regexp.Compile(aux.Regexp)
-		if err != nil {
-			return err
-		}
-	}
-
-	if strings.HasPrefix(aux.Regexp, "(?m)") {
-		p.multiLine = true
-	}
-
-	return nil
 }
 
-// SetStartTag to the current parser
-func (p *Rex) SetStartTag(rex string) {
-	p.StartTag = regexp.MustCompile(rex)
+// StartTag sets a regexp that will be used to start the match and extract
+// when working in Set mode (Value regexp)
+func StartTag(expr string) (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		regex, err := regexp.Compile(expr)
+		p.startTag = regex
+		return err
+	}
 }
 
-// SetStopTag to the current parser
-func (p *Rex) SetStopTag(rex string) {
-	p.StopTag = regexp.MustCompile(rex)
+// StopTag sets a regexp that when match will stop the parser
+func StopTag(expr string) (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		regex, err := regexp.Compile(expr)
+		p.stopTag = regex
+		return err
+	}
 }
 
-// SetSkipTag to the current parser
-func (p *Rex) SetSkipTag(rex string) {
-	p.SkipTag = regexp.MustCompile(rex)
+// SkipTag sets a regexp that when match the parser will skip lines until ContinueTag
+func SkipTag(expr string) (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		regex, err := regexp.Compile(expr)
+		p.skipTag = regex
+		return err
+	}
 }
 
-// SetContinueTag to the current parser
-func (p *Rex) SetContinueTag(rex string) {
-	p.ContinueTag = regexp.MustCompile(rex)
+// ContinueTag sets a regexp that when match the parser will resume after SkipTag
+func ContinueTag(expr string) (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		regex, err := regexp.Compile(expr)
+		p.continueTag = regex
+		return err
+	}
 }
 
 // Parse parses raw data using the specified Rex
-func (p *Rex) Parse(ctx context.Context, data io.Reader) (results <-chan Result) {
+func (p *Parser) Parse(ctx context.Context, data io.Reader) (results <-chan Result) {
 	resultCh := make(chan Result)
 
-	if p.Regexp == nil {
+	if p.regex == nil {
 		go p.parseSet(ctx, data, resultCh)
 		return resultCh
 	}
@@ -123,11 +126,11 @@ func (p *Rex) Parse(ctx context.Context, data io.Reader) (results <-chan Result)
 }
 
 // ParseBytes parses raw data using the specified RexLine
-func (p *Rex) ParseBytes(ctx context.Context, data []byte) (results <-chan Result) {
+func (p *Parser) ParseBytes(ctx context.Context, data []byte) (results <-chan Result) {
 	return p.Parse(ctx, bytes.NewReader(data))
 }
 
-func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) {
+func (p *Parser) parse(ctx context.Context, data io.Reader, results chan<- Result) {
 	defer close(results)
 
 	var skip bool
@@ -137,6 +140,11 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 	var buff bytes.Buffer
 	scanner := bufio.NewScanner(data)
 
+	// Handle multiline regexps
+	if strings.HasPrefix(p.regex.String(), "(?m)") {
+		p.multiLine = true
+	}
+
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			result = Result{}
@@ -145,24 +153,24 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 			return
 		}
 
-		if p.TrimSpaces {
+		if p.trimSpaces {
 			line = bytes.TrimSpace(scanner.Bytes())
 		} else {
 			line = scanner.Bytes()
 		}
 
-		if p.StopTag != nil && p.StopTag.Match(line) {
+		if p.stopTag != nil && p.stopTag.Match(line) {
 			break
 		}
 
 		// Only skip sections if both skip and continue regexps are set
-		if p.SkipTag != nil && p.ContinueTag != nil {
-			// Set the skip flag if KeySkipTag is set and match the current line
-			if p.SkipTag.Match(line) {
+		if p.skipTag != nil && p.continueTag != nil {
+			// Set the skip flag if skipTag is set and match the current line
+			if p.skipTag.Match(line) {
 				skip = true
 			}
-			//  Set the skip flag if KeyContinueTag is set and match the current line
-			if p.ContinueTag.Match(line) {
+			//  Set the skip flag if continueTag is set and match the current line
+			if p.continueTag.Match(line) {
 				skip = false
 			}
 
@@ -177,9 +185,9 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 				buff.WriteByte('\n')
 			}
 			buff.Write(line)
-			match = p.Regexp.FindSubmatch(buff.Bytes())
+			match = p.regex.FindSubmatch(buff.Bytes())
 		} else {
-			match = p.Regexp.FindSubmatch(line)
+			match = p.regex.FindSubmatch(line)
 		}
 
 		if match == nil {
@@ -187,7 +195,7 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 		}
 
 		match = match[1:]
-		if len(match) != len(p.ValueParsers) {
+		if len(match) != len(p.values) {
 			result = Result{}
 			result.Errors = append(result.Errors, errInvalidParsersNumber)
 			wrapCtxSend(ctx, result, results)
@@ -197,15 +205,15 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 		result = Result{}
 		result.Data = newJSON()
 
-		for vp := range p.ValueParsers {
+		for vp := range p.values {
 
-			value, err := p.ValueParsers[vp].ParseType(match[vp])
+			value, err := p.values[vp].ParseType(match[vp])
 			if err != nil {
-				err = fmt.Errorf("error parsing %s, %s", p.ValueParsers[vp].Name, err.Error())
+				err = fmt.Errorf("error parsing %s, %s", p.values[vp].name, err.Error())
 				result.Errors = append(result.Errors, err)
 			}
 
-			result.Data, _ = jsonSet(result.Data, value, p.ValueParsers[vp].Name)
+			result.Data, _ = jsonSet(result.Data, value, p.values[vp].name)
 		}
 
 		if p.multiLine {
@@ -219,7 +227,7 @@ func (p *Rex) parse(ctx context.Context, data io.Reader, results chan<- Result) 
 
 }
 
-func (p *Rex) parseSet(ctx context.Context, data io.Reader, results chan<- Result) {
+func (p *Parser) parseSet(ctx context.Context, data io.Reader, results chan<- Result) {
 	defer close(results)
 
 	var skip bool
@@ -239,24 +247,22 @@ func (p *Rex) parseSet(ctx context.Context, data io.Reader, results chan<- Resul
 			continue
 		}
 
-		// Trim and prepare if set a prepare regexp
-		if p.TrimSpaces {
+		if p.trimSpaces {
 			line = bytes.TrimSpace(line)
 		}
 
-		// Drop if KeyDropTag is set and match the current line
-		if p.StopTag != nil && p.StopTag.Match(line) {
+		if p.stopTag != nil && p.stopTag.Match(line) {
 			break
 		}
 
 		// Only skip sections if both skip and continue regexps are set
-		if p.SkipTag != nil && p.ContinueTag != nil {
+		if p.skipTag != nil && p.continueTag != nil {
 			// Set the skip flag if KeySkipTag is set and match the current line
-			if p.SkipTag.Match(line) {
+			if p.skipTag.Match(line) {
 				skip = true
 			}
 			//  Set the skip flag if KeyContinueTag is set and match the current line
-			if p.ContinueTag.Match(line) {
+			if p.continueTag.Match(line) {
 				skip = false
 			}
 
@@ -267,7 +273,7 @@ func (p *Rex) parseSet(ctx context.Context, data io.Reader, results chan<- Resul
 
 		// If content is a match for start_tag and
 		// document is valid deliver the result
-		if p.StartTag.Match(line) {
+		if p.startTag.Match(line) {
 			if len(result.Data) > 0 || result.Errors != nil {
 				if !wrapCtxSend(ctx, result, results) {
 					return
@@ -277,25 +283,25 @@ func (p *Rex) parseSet(ctx context.Context, data io.Reader, results chan<- Resul
 			result.Data = newJSON()
 		}
 
-		for vp := range p.ValueParsers {
+		for vp := range p.values {
 
 			// Continue if we already have a match for this regexp
-			if jsonHas(result.Data, p.ValueParsers[vp].Name) {
+			if jsonHas(result.Data, p.values[vp].name) {
 				continue
 			}
 
 			// Continue if we don't match this regexp
-			value, ok, err := p.ValueParsers[vp].Parse(line)
+			value, ok, err := p.values[vp].Parse(line)
 			if err != nil {
 				result.Errors = append(
 					result.Errors,
-					fmt.Errorf("error parsing %s, %s", p.ValueParsers[vp].Name, err.Error()),
+					fmt.Errorf("error parsing %s, %s", p.values[vp].name, err.Error()),
 				)
 				continue
 			}
 
 			if ok {
-				result.Data, _ = jsonSet(result.Data, value, p.ValueParsers[vp].Name)
+				result.Data, _ = jsonSet(result.Data, value, p.values[vp].name)
 			}
 		}
 	}
