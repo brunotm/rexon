@@ -2,7 +2,6 @@ package rexon
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -12,18 +11,17 @@ import (
 	"unsafe"
 )
 
+// make sure we satisfy the rexon.ParserInterface
+var _ ValueParser = (*Value)(nil)
+
 type ValueType string
 
 const (
-	Null     ValueType = "null"
 	Number   ValueType = "number"
 	String   ValueType = "string"
 	Bool     ValueType = "bool"
 	Time     ValueType = "time"
 	Duration ValueType = "duration"
-	Object   ValueType = "object"
-	Array    ValueType = "array"
-	Unknown  ValueType = "unknown"
 
 	// Decimal
 	Byte = 1
@@ -95,45 +93,85 @@ var (
 	}
 )
 
-// ValueParser represent each singular value to extract, parse and transform
-type ValueParser struct {
-	Name       string         `json:"name"`                  // Value name
-	Type       ValueType      `json:"type,omitempty"`        // ValueType
-	FromFormat string         `json:"from_format,omitempty"` // Format to convert from
-	ToFormat   string         `json:"to_format,omitempty"`   // Format to convert to
-	Round      int            `json:"round,omitempty"`       // Round when parsing numbers
-	Regexp     *regexp.Regexp `json:"regexp,omitempty"`      // Regexp used to extract data
+// Value represent each singular value to extract, parse and transform
+type Value struct {
+	name       string         // Value name
+	valueType  ValueType      // ValueType
+	fromFormat string         // Format to convert from
+	toFormat   string         // Format to convert to
+	round      int            // Round when parsing numbers
+	regex      *regexp.Regexp // Regexp used to extract data
 }
 
-// UnmarshalJSON sets *v to a copy of data
-func (v *ValueParser) UnmarshalJSON(data []byte) (err error) {
-	type alias ValueParser
-	aux := &struct {
-		*alias
-		Regexp string `json:"regexp"`
-	}{
-		alias: (*alias)(v),
-	}
+// ValueOpt functional options for Value
+type ValueOpt func(*Value) (err error)
 
-	if err := json.Unmarshal(data, &aux); err != nil {
+// NewValue creates a new value parser
+func NewValue(name string, vt ValueType, options ...ValueOpt) (v *Value, err error) {
+	v = &Value{name: name, valueType: vt, round: 2}
+	for _, opt := range options {
+		if err = opt(v); err != nil {
+			return nil, err
+		}
+	}
+	return v, nil
+}
+
+// MustNewValue is like NewValue but panics on error
+func MustNewValue(name string, vt ValueType, options ...ValueOpt) (v *Value) {
+	v, err := NewValue(name, vt, options...)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// ValueRegex sets the regexp for this value parser
+func ValueRegex(expr string) (opt ValueOpt) {
+	return func(v *Value) (err error) {
+		r, err := regexp.Compile(expr)
+		v.regex = r
 		return err
 	}
+}
 
-	if aux.Regexp != "" {
-		v.Regexp, err = regexp.Compile(aux.Regexp)
+// Round sets the round for this value parser, defaults to 2 if not specified
+func Round(round int) (opt ValueOpt) {
+	return func(v *Value) (err error) {
+		v.round = round
+		return nil
 	}
-	return err
+}
+
+// FromFormat sets the from format for this value parser
+func FromFormat(format string) (opt ValueOpt) {
+	return func(v *Value) (err error) {
+		v.fromFormat = format
+		return nil
+	}
+}
+
+// ToFormat sets the destination format for this value parser
+func ToFormat(format string) (opt ValueOpt) {
+	return func(v *Value) (err error) {
+		v.toFormat = format
+		return nil
+	}
 }
 
 // Parse extracts the value from the given []byte and its type using the configured parameters
-func (v *ValueParser) Parse(b []byte) (value interface{}, ok bool, err error) {
-	match := v.Regexp.FindSubmatch(b)
+func (v *Value) Parse(b []byte) (value interface{}, ok bool, err error) {
+	if v.regex == nil {
+		return nil, false, fmt.Errorf("no regex specified for %s", v.name)
+	}
+
+	match := v.regex.FindSubmatch(b)
 	if match == nil {
 		return nil, false, nil
 	}
 
 	if len(match) > 2 {
-		return nil, true, fmt.Errorf("parser: %s invalid number of matches for: %s", v.Name, string(b))
+		return nil, true, fmt.Errorf("parser: %s invalid number of matches for: %s", v.name, string(b))
 	}
 
 	value, err = v.ParseType(match[1])
@@ -141,8 +179,8 @@ func (v *ValueParser) Parse(b []byte) (value interface{}, ok bool, err error) {
 }
 
 // ParseType for a given []byte using the configured parameters
-func (v *ValueParser) ParseType(b []byte) (value interface{}, err error) {
-	switch v.Type {
+func (v *Value) ParseType(b []byte) (value interface{}, err error) {
+	switch v.valueType {
 	case String:
 		value = string(b)
 	case Number:
@@ -154,21 +192,21 @@ func (v *ValueParser) ParseType(b []byte) (value interface{}, err error) {
 	case Duration:
 		value, err = v.parseDuration(b)
 	default:
-		err = fmt.Errorf("unsupported type %s for: %s", v.Type, v.Name)
+		err = fmt.Errorf("unsupported type %s for: %s", v.valueType, v.name)
 	}
 
 	return value, err
 }
 
 // parseDuration parses a string representation of duration into a specified time unit or in a time.Duration
-func (v *ValueParser) parseDuration(b []byte) (value interface{}, err error) {
+func (v *Value) parseDuration(b []byte) (value interface{}, err error) {
 	s := *(*string)(unsafe.Pointer(&b))
 	d, err := time.ParseDuration(s)
 	if err != nil {
 		return nil, err
 	}
 
-	switch strings.ToLower(v.ToFormat) {
+	switch strings.ToLower(v.toFormat) {
 	case "nanoseconds", "nanosecond", "nano":
 		value = d.Nanoseconds()
 	case "milliseconds", "millisecond", "milli":
@@ -182,21 +220,21 @@ func (v *ValueParser) parseDuration(b []byte) (value interface{}, err error) {
 	case "string":
 		value = d.String()
 	default:
-		err = fmt.Errorf("unsupported destination format for %s: %s", v.Name, v.ToFormat)
+		err = fmt.Errorf("unsupported destination format for %s: %s", v.name, v.toFormat)
 	}
 
 	return value, err
 }
 
 // parseTime parses a string representation of time from the specified format into a specified format or in a time.Time
-func (v *ValueParser) parseTime(b []byte) (value interface{}, err error) {
+func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 	s := *(*string)(unsafe.Pointer(&b))
-	t, err := time.Parse(v.FromFormat, s)
+	t, err := time.Parse(v.fromFormat, s)
 	if err != nil {
 		return nil, err
 	}
 
-	switch strings.ToLower(v.ToFormat) {
+	switch strings.ToLower(v.toFormat) {
 	case "unix":
 		value = t.Unix()
 	case "unix_milli":
@@ -208,7 +246,7 @@ func (v *ValueParser) parseTime(b []byte) (value interface{}, err error) {
 	case "rfc3339", "string":
 		value = t.Format(time.RFC3339)
 	default:
-		err = fmt.Errorf("unsupported destination format for %s: %s", v.Name, v.ToFormat)
+		err = fmt.Errorf("unsupported destination format for %s: %s", v.name, v.toFormat)
 
 	}
 
@@ -216,23 +254,23 @@ func (v *ValueParser) parseTime(b []byte) (value interface{}, err error) {
 }
 
 // parseNumber parses a number string representation into a float64
-func (v *ValueParser) parseNumber(b []byte) (value float64, err error) {
-	if v.FromFormat == "digital_unit" {
+func (v *Value) parseNumber(b []byte) (value float64, err error) {
+	if v.fromFormat == "digital_unit" {
 		return v.parseUnit(b)
 	}
 
-	return parseFloat64(*(*string)(unsafe.Pointer(&b)), v.Round)
+	return parseFloat64(*(*string)(unsafe.Pointer(&b)), v.round)
 }
 
 // parseUnit parses a digital unit string representation into a float64 in
 // bytes or any other unit format
-func (v *ValueParser) parseUnit(b []byte) (value float64, err error) {
+func (v *Value) parseUnit(b []byte) (value float64, err error) {
 
 	b = bytes.ToLower(b)
 
 	match := rexUnits.FindSubmatch(b)
 	if match == nil {
-		return 0, fmt.Errorf("no digital unit match for %s: %s", v.Name, string(b))
+		return 0, fmt.Errorf("no digital unit match for %s: %s", v.name, string(b))
 	}
 
 	val, err := strconv.ParseFloat(*(*string)(unsafe.Pointer(&match[1])), 64)
@@ -244,16 +282,16 @@ func (v *ValueParser) parseUnit(b []byte) (value float64, err error) {
 	u := *(*string)(unsafe.Pointer(&match[2]))
 	unit, ok := digitalUnits[u]
 	if !ok {
-		return 0, fmt.Errorf("cannot parse unit for %s: %s", v.Name, u)
+		return 0, fmt.Errorf("cannot parse unit for %s: %s", v.name, u)
 	}
 	val = val * unit
 
 	// Convert to the specified unit
-	unit, ok = digitalUnits[v.ToFormat]
+	unit, ok = digitalUnits[v.toFormat]
 	if !ok {
-		return 0, fmt.Errorf("unsupported unit for %s: %s", v.Name, v.ToFormat)
+		return 0, fmt.Errorf("unsupported unit for %s: %s", v.name, v.toFormat)
 	}
-	return Round(float64(val/unit), v.Round), nil
+	return round(float64(val/unit), v.round), nil
 }
 
 // parseFloat64 parses a string into a float64 rounding it to the round precision
@@ -266,11 +304,11 @@ func parseFloat64(s string, r int) (f float64, err error) {
 	if r < 0 {
 		return f, nil
 	}
-	return Round(f, r), nil
+	return round(f, r), nil
 }
 
 // Round a float to the specified precision
-func Round(f float64, round int) (n float64) {
+func round(f float64, round int) (n float64) {
 	shift := math.Pow(10, float64(round))
 	return math.Floor((f*shift)+.5) / shift
 }
