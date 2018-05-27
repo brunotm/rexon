@@ -6,59 +6,19 @@ import (
 )
 
 var (
-	dataString      = []byte(`string: 45j45h45kh5hbbbb`)
-	dataValueString = []byte(`{
-		"type": "string",
-		"regexp": "string:\\s+(\\w+)"
-	}`)
-
-	dataNumber      = []byte(`number: 1.6445`)
-	dataValueNumber = []byte(`{
-		"type": "number",
-		"round": 2,
-		"regexp": "number:\\s+([-+]?\\d*\\.?\\d+)"
-	}`)
-
-	dataDigital      = []byte(`digital: 1.6445666GB`)
-	dataValueDigital = []byte(`{
-		"type":  "number",
-		"from_format": "digital_unit",
-		"to_format": "mb",
-		"round": 3,
-		"regexp": "digital:\\s+([-+]?\\d*\\.?\\d+\\w*)"
-	}`)
-
-	dataTime      = []byte(`time: 2018-12-25 15:04:05`)
-	dataValueTime = []byte(`{
-		"type": "time",
-		"to_format": "rfc3339",
-		"from_format": "2006-01-02 15:04:05",
-		"regexp": "time:\\s+(.*)"
-	}`)
-
-	dataDuration      = []byte(`duration: 5m`)
-	dataValueDuration = []byte(`{
-		"type": "duration",
-		"to_format": "sec",
-		"regexp": "duration:\\s+(.*)"
-	}`)
+	dataString   = []byte(`string: 45j45h45kh5hbbbb`)
+	dataNumber   = []byte(`number: 1.6445`)
+	dataDigital  = []byte(`digital: 1.6445666GB`)
+	dataTime     = []byte(`time: 2018-12-25 15:04:05`)
+	dataDuration = []byte(`duration: 5m`)
 )
 
-func valueUnmarshal(data []byte) (v *ValueParser, err error) {
-	v = &ValueParser{}
-	err = v.UnmarshalJSON(data)
-	return v, err
-}
-
-func TestValueUnmarshal(t *testing.T) {
-	_, err := valueUnmarshal(dataValueNumber)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestValueParseString(t *testing.T) {
-	v, err := valueUnmarshal(dataValueString)
+	v, err := NewValue(
+		"string",
+		String,
+		ValueRegex(`string:\s+(\w+)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +30,12 @@ func TestValueParseString(t *testing.T) {
 }
 
 func TestValueParseNumber(t *testing.T) {
-	v, err := valueUnmarshal(dataValueNumber)
+	v, err := NewValue(
+		"number",
+		Number,
+		Round(2),
+		ValueRegex(`number:\s+([-+]?\d*\.?\d+)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +47,14 @@ func TestValueParseNumber(t *testing.T) {
 }
 
 func TestValueParseDigital(t *testing.T) {
-	v, err := valueUnmarshal(dataValueDigital)
+	v, err := NewValue(
+		"digital",
+		Number,
+		FromFormat("digital_unit"),
+		ToFormat("mb"),
+		Round(3),
+		ValueRegex(`digital:\s+([-+]?\d*\.?\d+\w*)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +66,13 @@ func TestValueParseDigital(t *testing.T) {
 }
 
 func TestValueParseTime(t *testing.T) {
-	v, err := valueUnmarshal(dataValueTime)
+	v, err := NewValue(
+		"time",
+		Time,
+		ToFormat("rfc3339"),
+		FromFormat("2006-01-02 15:04:05"),
+		ValueRegex(`time:\s+(.*)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +84,12 @@ func TestValueParseTime(t *testing.T) {
 }
 
 func TestValueParseDuration(t *testing.T) {
-	v, err := valueUnmarshal(dataValueDuration)
+	v, err := NewValue(
+		"duration",
+		Duration,
+		ToFormat("sec"),
+		ValueRegex(`duration:\s+(.*)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}

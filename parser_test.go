@@ -21,46 +21,6 @@ var (
 	  253       3 dm-3 245103866 0 2228416474 1214164760 955225124 0 19412662904 2534810408 0 405566856 3757302528
 
 	  `)
-	parserLineLine = []byte(`{
-		"regexp": "^(\\d+)\\s+(\\d+)\\s+(.*?)\\s+",
-		"value_parsers": [
-			{
-				"name": "maj",
-				"type": "number",
-				"round": 2
-			},
-			{
-				"name": "min",
-				"type": "number",
-				"round": 2
-			},
-			{
-				"name": "device",
-				"type": "string"
-			}
-		]
-		}`)
-	parserLineSet = []byte(`{
-			"value_parsers": [
-				{
-					"name": "maj",
-					"type": "number",
-					"round": 2,
-					"regexp": "^(\\d+)\\s+\\d+\\s+.*?\\s+"
-				},
-				{
-					"name": "min",
-					"type": "number",
-					"round": 2,
-					"regexp": "^\\d+\\s+(\\d+)\\s+.*?\\s+"
-				},
-				{
-					"name": "device",
-					"type": "string",
-					"regexp": "^\\d+\\s+\\d+\\s+(.*?)\\s+"
-				}
-			]
-			}`)
 
 	dataMLine = []byte(`
 			message aaammmkkklll
@@ -69,79 +29,21 @@ vmm 7hgj cdd xxkkll
 
 message bbmm
 id 67
-vmm bcn cdd llmm
-
-		  `)
-
-	parserMLineLine = []byte(`{
-			"regexp": "(?m)\\s*message\\s*(\\w+)\\nid\\s*([-+]?[0-9]*\\.?[0-9]+)\nvmm\\s*(\\w+)\\s*cdd\\s*(\\w+)",
-			"value_parsers": [
-				{
-					"name": "message"
-				},
-				{
-					"name": "id",
-					"type": "number",
-					"round": 2
-				},
-				{
-					"name": "vmm",
-					"type": "string"
-				},
-				{
-					"name": "cdd",
-					"type": "string"
-				}
-			]
-			}`)
-
-	parserMLineSet = []byte(`{
-				"start_tag": "message.*",
-				"value_parsers": [
-					{
-						"name": "message",
-						"type": "string",
-						"regexp": "\\s*message\\s*(\\w+)\\s*"
-					},
-					{
-						"name": "id",
-						"type": "number",
-						"round": 2,
-						"regexp": "id\\s*([-+]?[0-9]*\\.?[0-9]+)\\s*"
-					},
-					{
-						"name": "vmm",
-						"type": "string",
-						"regexp": "vmm\\s*(\\w+)\\s*"
-					},
-					{
-						"name": "cdd",
-						"type": "string",
-						"regexp": "cdd\\s*(\\w+)"
-					}
-				]
-				}`)
+vmm bcn cdd llmm`)
 )
 
-func parserUnmarshal(data []byte) (p *Rex, err error) {
-	p = &Rex{}
-	err = p.UnmarshalJSON(data)
-	return p, err
-}
-
-func TestParserUnmarshal(t *testing.T) {
-	p, err := parserUnmarshal(parserLineSet)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("%#v\n", p)
-}
-
 func TestParserLineLine(t *testing.T) {
-	p, err := parserUnmarshal(parserLineLine)
+
+	values := []*Value{
+		MustNewValue("maj", Number),
+		MustNewValue("min", Number),
+		MustNewValue("device", String)}
+
+	p, err := NewParser(values, LineRegex(`(\d+)\s+(\d+)\s+(.*?)\s+`))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for d := range p.ParseBytes(context.Background(), dataLine) {
 		if d.Errors != nil {
 			t.Fatal(d.Errors)
@@ -152,21 +54,36 @@ func TestParserLineLine(t *testing.T) {
 }
 
 func TestParserMLineLine(t *testing.T) {
-	p, err := parserUnmarshal(parserMLineLine)
+	values := []*Value{
+		MustNewValue("message", String),
+		MustNewValue("id", Number),
+		MustNewValue("vmm", String),
+		MustNewValue("cdd", String)}
+
+	p, err := NewParser(
+		values,
+		LineRegex(`(?m)\s*message\s*(\w+)\nid\s*([-+]?[0-9]*\.?[0-9]+)\nvmm\s*(\w+)\s*cdd\s*(\w+)`))
+
 	if err != nil {
 		t.Fatal(err)
 	}
 	for d := range p.ParseBytes(context.Background(), dataMLine) {
-		// if d.Errors != nil {
-		// 	t.Fatal(d.Errors)
-		// }
+		if d.Errors != nil {
+			t.Fatal(d.Errors)
+		}
 		t.Logf("%#v\n", d)
 	}
 
 }
 
 func TestParserMLineSet(t *testing.T) {
-	p, err := parserUnmarshal(parserMLineSet)
+	values := []*Value{
+		MustNewValue("message", String, ValueRegex(`\s*message\s*(\w+)\s*`)),
+		MustNewValue("id", Number, Round(2), ValueRegex(`id\s*([-+]?[0-9]*\.?[0-9]+)\s*`)),
+		MustNewValue("vmm", String, ValueRegex(`vmm\s*(\w+)\s*`)),
+		MustNewValue("cdd", String, ValueRegex(`cdd\s*(\w+)`))}
+
+	p, err := NewParser(values, StartTag(`message.*`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,65 +97,76 @@ func TestParserMLineSet(t *testing.T) {
 }
 
 func BenchmarkLineLine(b *testing.B) {
-	p, err := parserUnmarshal(parserLineLine)
+	values := []*Value{
+		MustNewValue("maj", Number),
+		MustNewValue("min", Number),
+		MustNewValue("device", String)}
+
+	p, err := NewParser(values, LineRegex(`(\d+)\s+(\d+)\s+(.*?)\s+`))
+
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		for range p.ParseBytes(context.Background(), dataMLine) {
-			// if d.Errors != nil {
-			// 	b.Fatal(d.Errors)
-			// }
-			// json.Marshal(r.Data)
 		}
 	}
 }
 
 func BenchmarkLineSet(b *testing.B) {
-	p, err := parserUnmarshal(parserLineSet)
+	values := []*Value{
+		MustNewValue("maj", Number, Round(2), ValueRegex(`(\d+)\s+\d+\s+.*?\s+`)),
+		MustNewValue("min", Number, Round(2), ValueRegex(`\d+\s+(\d+)\s+.*?\s+`)),
+		MustNewValue("device", String, ValueRegex(`\d+\s+\d+\s+(.*?)\s+`))}
+
+	p, err := NewParser(values)
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		for range p.ParseBytes(context.Background(), dataMLine) {
-			// if d.Errors != nil {
-			// 	b.Fatal(d.Errors)
-			// }
-			// json.Marshal(r.Data)
 		}
 	}
 }
 
 func BenchmarkMLineLine(b *testing.B) {
-	p, err := parserUnmarshal(parserMLineLine)
+	values := []*Value{
+		MustNewValue("message", String),
+		MustNewValue("id", Number),
+		MustNewValue("vmm", String),
+		MustNewValue("cdd", String)}
+
+	p, err := NewParser(
+		values,
+		LineRegex(`(?m)\s*message\s*(\w+)\nid\s*([-+]?[0-9]*\.?[0-9]+)\nvmm\s*(\w+)\s*cdd\s*(\w+)`))
+
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		for range p.ParseBytes(context.Background(), dataMLine) {
-			// if d.Errors != nil {
-			// 	b.Fatal(d.Errors)
-			// }
-			// json.Marshal(r.Data)
 		}
 	}
 }
 
 func BenchmarkMLineSet(b *testing.B) {
-	p, err := parserUnmarshal(parserMLineSet)
+	values := []*Value{
+		MustNewValue("message", String, ValueRegex(`\s*message\s*(\w+)\s*`)),
+		MustNewValue("id", Number, Round(2), ValueRegex(`id\s*([-+]?[0-9]*\.?[0-9]+)\s*`)),
+		MustNewValue("vmm", String, ValueRegex(`vmm\s*(\w+)\s*`)),
+		MustNewValue("cdd", String, ValueRegex(`cdd\s*(\w+)`))}
+
+	p, err := NewParser(values, StartTag(`message.*`))
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		for range p.ParseBytes(context.Background(), dataMLine) {
-			// if d.Errors != nil {
-			// 	b.Fatal(d.Errors)
-			// }
-			// json.Marshal(r.Data)
 		}
 	}
 }
