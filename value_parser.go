@@ -42,6 +42,7 @@ const (
 
 var (
 	rexUnits     = regexp.MustCompile(`([-+]?[0-9]*\.?[0-9]+)\s*(\w+)?`)
+	rexIsUnit    = regexp.MustCompile(`[-+]?[0-9]*\.?[0-9]+\s*\w+`)
 	digitalUnits = map[string]float64{
 		"":          Byte,
 		"b":         Byte,
@@ -147,7 +148,7 @@ func Round(round int) (opt ValueOpt) {
 // FromFormat sets the from format for this value parser
 func FromFormat(format string) (opt ValueOpt) {
 	return func(v *Value) (err error) {
-		v.fromFormat = format
+		v.fromFormat = strings.ToLower(format)
 		return nil
 	}
 }
@@ -155,7 +156,7 @@ func FromFormat(format string) (opt ValueOpt) {
 // ToFormat sets the destination format for this value parser
 func ToFormat(format string) (opt ValueOpt) {
 	return func(v *Value) (err error) {
-		v.toFormat = format
+		v.toFormat = strings.ToLower(format)
 		return nil
 	}
 }
@@ -208,22 +209,35 @@ func (v *Value) ParseType(b []byte) (value interface{}, err error) {
 
 // parseDuration parses a string representation of duration into a specified time unit or in a time.Duration
 func (v *Value) parseDuration(b []byte) (value interface{}, err error) {
+	b = bytes.ToLower(b)
+
+	if !rexIsUnit.Match(b) {
+		// s := *(*string)(unsafe.Pointer(&b))
+		// if !unicode.IsLetter(rune(s[len(s)-1])) {
+		// Defaults to seconds if no unit available
+		if v.fromFormat == "" {
+			b = append(b, 's')
+		} else {
+			b = append(b, v.fromFormat...)
+		}
+	}
+
 	s := *(*string)(unsafe.Pointer(&b))
 	d, err := time.ParseDuration(s)
 	if err != nil {
 		return nil, err
 	}
 
-	switch strings.ToLower(v.toFormat) {
-	case "nanoseconds", "nanosecond", "nano":
+	switch v.toFormat {
+	case "nanoseconds", "nanosecond", "nano", "ns":
 		value = d.Nanoseconds()
-	case "milliseconds", "millisecond", "milli":
+	case "milliseconds", "millisecond", "milli", "ms":
 		value = d.Nanoseconds() / int64(time.Millisecond)
-	case "seconds", "second", "sec":
+	case "seconds", "second", "sec", "s":
 		value = d.Seconds()
-	case "minutes", "minute", "min":
+	case "minutes", "minute", "min", "m":
 		value = d.Minutes()
-	case "hours", "hour":
+	case "hours", "hour", "h":
 		value = d.Hours()
 	case "string", "":
 		value = d.String()
@@ -242,7 +256,7 @@ func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 		return nil, err
 	}
 
-	switch strings.ToLower(v.toFormat) {
+	switch v.toFormat {
 	case "unix":
 		value = t.Unix()
 	case "unix_milli":
