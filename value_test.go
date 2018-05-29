@@ -49,8 +49,7 @@ func TestValueParseNumber(t *testing.T) {
 func TestValueParseDigital(t *testing.T) {
 	v, err := NewValue(
 		"digital",
-		Number,
-		FromFormat("digital_unit"),
+		DigitalUnit,
 		ToFormat("mb"),
 		Round(3),
 		ValueRegex(`digital:\s+([-+]?\d*\.?\d+\w*)`))
@@ -87,7 +86,7 @@ func TestValueParseDuration(t *testing.T) {
 	v, err := NewValue(
 		"duration",
 		Duration,
-		ToFormat("sec"),
+		ToFormat("second"),
 		ValueRegex(`duration:\s+(.*)`))
 
 	if err != nil {

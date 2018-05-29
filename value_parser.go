@@ -17,11 +17,12 @@ var _ ValueParser = (*Value)(nil)
 type ValueType string
 
 const (
-	Number   ValueType = "number"
-	String   ValueType = "string"
-	Bool     ValueType = "bool"
-	Time     ValueType = "time"
-	Duration ValueType = "duration"
+	Number      ValueType = "number"
+	String      ValueType = "string"
+	Bool        ValueType = "bool"
+	Time        ValueType = "time"
+	Duration    ValueType = "duration"
+	DigitalUnit ValueType = "digital_unit"
 
 	// Decimal
 	Byte = 1
@@ -196,6 +197,8 @@ func (v *Value) ParseType(b []byte) (value interface{}, err error) {
 		value, err = v.parseTime(b)
 	case Duration:
 		value, err = v.parseDuration(b)
+	case DigitalUnit:
+		value, err = v.parseUnit(b)
 	default:
 		err = fmt.Errorf("unsupported type %s for: %s", v.valueType, v.name)
 	}
@@ -222,7 +225,7 @@ func (v *Value) parseDuration(b []byte) (value interface{}, err error) {
 		value = d.Minutes()
 	case "hours", "hour":
 		value = d.Hours()
-	case "string":
+	case "string", "":
 		value = d.String()
 	default:
 		err = fmt.Errorf("unsupported destination format for %s: %s", v.name, v.toFormat)
@@ -248,7 +251,7 @@ func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 		value = t.UnixNano()
 	case "rfc3339nano":
 		value = t.Format(time.RFC3339Nano)
-	case "rfc3339", "string":
+	case "rfc3339", "string", "":
 		value = t.Format(time.RFC3339)
 	default:
 		err = fmt.Errorf("unsupported destination format for %s: %s", v.name, v.toFormat)
@@ -260,11 +263,15 @@ func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 
 // parseNumber parses a number string representation into a float64
 func (v *Value) parseNumber(b []byte) (value float64, err error) {
-	if v.fromFormat == "digital_unit" {
-		return v.parseUnit(b)
+	value, err = strconv.ParseFloat(*(*string)(unsafe.Pointer(&b)), 64)
+	if err != nil {
+		return 0, err
 	}
 
-	return parseFloat64(*(*string)(unsafe.Pointer(&b)), v.round)
+	if v.round < 1 {
+		return value, nil
+	}
+	return round(value, v.round), nil
 }
 
 // parseUnit parses a digital unit string representation into a float64 in
@@ -297,19 +304,6 @@ func (v *Value) parseUnit(b []byte) (value float64, err error) {
 		return 0, fmt.Errorf("unsupported unit for %s: %s", v.name, v.toFormat)
 	}
 	return round(float64(val/unit), v.round), nil
-}
-
-// parseFloat64 parses a string into a float64 rounding it to the round precision
-func parseFloat64(s string, r int) (f float64, err error) {
-	f, err = strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	if r < 0 {
-		return f, nil
-	}
-	return round(f, r), nil
 }
 
 // Round a float to the specified precision
