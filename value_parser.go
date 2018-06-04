@@ -41,8 +41,8 @@ const (
 )
 
 var (
-	rexUnits     = regexp.MustCompile(`([-+]?[0-9]*\.?[0-9]+)\s*(\w+)?`)
-	rexIsUnit    = regexp.MustCompile(`[-+]?[0-9]*\.?[0-9]+\s*\w+`)
+	rexUnit      = regexp.MustCompile(`([-+]?\d*\.?\d+)\s*([a-z,A-Z])?`)
+	rexIsUnit    = regexp.MustCompile(`[-+]?\d*\.?\d+\s*[a-z,A-Z]`)
 	digitalUnits = map[string]float64{
 		"":          Byte,
 		"b":         Byte,
@@ -294,7 +294,7 @@ func (v *Value) parseUnit(b []byte) (value float64, err error) {
 
 	b = bytes.ToLower(b)
 
-	match := rexUnits.FindSubmatch(b)
+	match := rexUnit.FindSubmatch(b)
 	if match == nil {
 		return 0, fmt.Errorf("no digital unit match for %s: %s", v.name, string(b))
 	}

@@ -20,6 +20,7 @@ var _ DataParser = (*Parser)(nil)
 
 // Parser type
 type Parser struct {
+	findAll     bool
 	multiLine   bool
 	trimSpaces  bool
 	startTag    *regexp.Regexp
@@ -72,6 +73,14 @@ func LineRegex(expr string) (opt ParserOpt) {
 		regex, err := regexp.Compile(expr)
 		p.regex = regex
 		return err
+	}
+}
+
+// FindAll successive matches for the specified LineRegex
+func FindAll() (opt ParserOpt) {
+	return func(p *Parser) (err error) {
+		p.findAll = true
+		return nil
 	}
 }
 
@@ -185,9 +194,17 @@ func (p *Parser) parse(ctx context.Context, data io.Reader, results chan<- Resul
 				buff.WriteByte('\n')
 			}
 			buff.Write(line)
-			match = p.regex.FindSubmatch(buff.Bytes())
+			if p.findAll {
+				match = p.handleAllSubmatch(buff.Bytes())
+			} else {
+				match = p.regex.FindSubmatch(buff.Bytes())
+			}
 		} else {
-			match = p.regex.FindSubmatch(line)
+			if p.findAll {
+				match = p.handleAllSubmatch(line)
+			} else {
+				match = p.regex.FindSubmatch(line)
+			}
 		}
 
 		if match == nil {
@@ -198,8 +215,10 @@ func (p *Parser) parse(ctx context.Context, data io.Reader, results chan<- Resul
 		if len(match) != len(p.values) {
 			result = Result{}
 			result.Errors = append(result.Errors, errInvalidParsersNumber)
-			wrapCtxSend(ctx, result, results)
-			return
+			if !wrapCtxSend(ctx, result, results) {
+				return
+			}
+			continue
 		}
 
 		result = Result{}
@@ -311,4 +330,17 @@ func (p *Parser) parseSet(ctx context.Context, data io.Reader, results chan<- Re
 			return
 		}
 	}
+}
+
+func (p *Parser) handleAllSubmatch(data []byte) (match [][]byte) {
+	subs := p.regex.FindAllSubmatch(data, -1)
+	if len(subs) == 0 {
+		return nil
+	}
+	match = make([][]byte, 0, len(subs)+1)
+	match = append(match, nil)
+	for i := range subs {
+		match = append(match, subs[i][1])
+	}
+	return match
 }
