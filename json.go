@@ -8,6 +8,10 @@ import (
 	"github.com/buger/jsonparser"
 )
 
+var (
+	nullValue = []byte(`null`)
+)
+
 func newJSON() (data []byte) {
 	data = make([]byte, 0, 64)
 	data = append(data, '{', '}')
@@ -23,6 +27,8 @@ func jsonSet(data []byte, value interface{}, path ...string) (d []byte, err erro
 	buf := make([]byte, 0, 16)
 
 	switch v := value.(type) {
+	case nil:
+		buf = nullValue
 	case bool:
 		buf = strconv.AppendBool(buf, v)
 	case int:

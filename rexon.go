@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-// Result type from Parse methods
+// Result type for each extracted JSON data and associated parse errors
 type Result struct {
 	Data   []byte
 	Errors []error
@@ -19,6 +19,5 @@ type DataParser interface {
 
 // ValueParser interface
 type ValueParser interface {
-	Parse(b []byte) (value interface{}, ok bool, err error)
-	ParseType(b []byte) (value interface{}, err error)
+	Parse(b []byte) (value interface{}, matched bool, err error)
 }

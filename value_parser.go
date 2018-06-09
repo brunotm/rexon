@@ -98,6 +98,7 @@ var (
 // Value represent each singular value to extract, parse and transform
 type Value struct {
 	name       string         // Value name
+	nullable   bool           // Nullable
 	valueType  ValueType      // ValueType
 	fromFormat string         // Format to convert from
 	toFormat   string         // Format to convert to
@@ -110,7 +111,7 @@ type ValueOpt func(*Value) (err error)
 
 // NewValue creates a new value parser
 func NewValue(name string, vt ValueType, options ...ValueOpt) (v *Value, err error) {
-	v = &Value{name: name, valueType: vt, round: 2}
+	v = &Value{name: name, valueType: vt, round: 2, nullable: false}
 	for _, opt := range options {
 		if err = opt(v); err != nil {
 			return nil, err
@@ -148,7 +149,7 @@ func Round(round int) (opt ValueOpt) {
 // FromFormat sets the from format for this value parser
 func FromFormat(format string) (opt ValueOpt) {
 	return func(v *Value) (err error) {
-		v.fromFormat = strings.ToLower(format)
+		v.fromFormat = format
 		return nil
 	}
 }
@@ -161,35 +162,39 @@ func ToFormat(format string) (opt ValueOpt) {
 	}
 }
 
+// Nullable sets the value to null on parsing errors and ignores the error
+func Nullable() (opt ValueOpt) {
+	return func(v *Value) (err error) {
+		v.nullable = true
+		return nil
+	}
+}
+
 // Name returns this value name
 func (v *Value) Name() (name string) {
 	return v.name
 }
 
-// Parse extracts the value from the given []byte and its type using the configured parameters
-func (v *Value) Parse(b []byte) (value interface{}, ok bool, err error) {
-	if v.regex == nil {
-		return nil, false, fmt.Errorf("no regex specified for %s", v.name)
+// Parse parses the value for the given byte. Uses the ValueRegex if specified to first extract the data
+func (v *Value) Parse(b []byte) (value interface{}, matched bool, err error) {
+
+	// Extract data with the provided regex if specified
+	if v.regex != nil {
+		match := v.regex.FindSubmatch(b)
+		if match == nil {
+			return nil, false, nil
+		}
+
+		if len(match) > 2 {
+			return nil, true, fmt.Errorf("parser: %s invalid number of matches for: %s", v.name, string(b))
+		}
+
+		b = match[1]
 	}
 
-	match := v.regex.FindSubmatch(b)
-	if match == nil {
-		return nil, false, nil
-	}
-
-	if len(match) > 2 {
-		return nil, true, fmt.Errorf("parser: %s invalid number of matches for: %s", v.name, string(b))
-	}
-
-	value, err = v.ParseType(match[1])
-	return value, true, err
-}
-
-// ParseType for a given []byte using the configured parameters
-func (v *Value) ParseType(b []byte) (value interface{}, err error) {
 	switch v.valueType {
 	case String:
-		value = string(b)
+		value, err = v.parseString(b)
 	case Number:
 		value, err = v.parseNumber(b)
 	case Bool:
@@ -202,6 +207,22 @@ func (v *Value) ParseType(b []byte) (value interface{}, err error) {
 		value, err = v.parseUnit(b)
 	default:
 		err = fmt.Errorf("unsupported type %s for: %s", v.valueType, v.name)
+	}
+
+	// Set to null if we cannot parse and Nullable is specified
+	if err != nil && v.nullable {
+		return nil, true, nil
+	}
+
+	return value, true, err
+}
+
+func (v *Value) parseString(b []byte) (value interface{}, err error) {
+	str := *(*string)(unsafe.Pointer(&b))
+	if v.nullable && (str == "null" || str == "") {
+		value = nil
+	} else {
+		value = str
 	}
 
 	return value, err
@@ -263,10 +284,10 @@ func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 		value = t.UnixNano() / int64(time.Millisecond)
 	case "unix_nano":
 		value = t.UnixNano()
-	case "rfc3339nano":
-		value = t.Format(time.RFC3339Nano)
-	case "rfc3339", "string", "":
+	case "rfc3339":
 		value = t.Format(time.RFC3339)
+	case "rfc3339nano", "string", "":
+		value = t.Format(time.RFC3339Nano)
 	default:
 		err = fmt.Errorf("unsupported destination format for %s: %s", v.name, v.toFormat)
 
@@ -276,16 +297,17 @@ func (v *Value) parseTime(b []byte) (value interface{}, err error) {
 }
 
 // parseNumber parses a number string representation into a float64
-func (v *Value) parseNumber(b []byte) (value float64, err error) {
-	value, err = strconv.ParseFloat(*(*string)(unsafe.Pointer(&b)), 64)
+func (v *Value) parseNumber(b []byte) (value interface{}, err error) {
+	f, err := strconv.ParseFloat(*(*string)(unsafe.Pointer(&b)), 64)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if v.round < 1 {
 		return value, nil
 	}
-	return round(value, v.round), nil
+
+	return round(f, v.round), nil
 }
 
 // parseUnit parses a digital unit string representation into a float64 in
@@ -293,7 +315,6 @@ func (v *Value) parseNumber(b []byte) (value float64, err error) {
 func (v *Value) parseUnit(b []byte) (value float64, err error) {
 
 	b = bytes.ToLower(b)
-
 	match := rexUnit.FindSubmatch(b)
 	if match == nil {
 		return 0, fmt.Errorf("no digital unit match for %s: %s", v.name, string(b))
@@ -304,8 +325,11 @@ func (v *Value) parseUnit(b []byte) (value float64, err error) {
 		return 0, err
 	}
 
-	// Find the current unit and convert to bytes
+	// Use fromFormat if specified and no unit is found
 	u := *(*string)(unsafe.Pointer(&match[2]))
+	if u == "" && v.fromFormat != "" {
+		u = v.fromFormat
+	}
 	unit, ok := digitalUnits[u]
 	if !ok {
 		return 0, fmt.Errorf("cannot parse unit for %s: %s", v.name, u)
@@ -317,6 +341,7 @@ func (v *Value) parseUnit(b []byte) (value float64, err error) {
 	if !ok {
 		return 0, fmt.Errorf("unsupported unit for %s: %s", v.name, v.toFormat)
 	}
+
 	return round(float64(val/unit), v.round), nil
 }
 

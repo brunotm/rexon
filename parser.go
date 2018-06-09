@@ -226,7 +226,7 @@ func (p *Parser) parse(ctx context.Context, data io.Reader, results chan<- Resul
 
 		for vp := range p.values {
 
-			value, err := p.values[vp].ParseType(match[vp])
+			value, _, err := p.values[vp].Parse(match[vp])
 			if err != nil {
 				err = fmt.Errorf("error parsing %s, %s", p.values[vp].name, err.Error())
 				result.Errors = append(result.Errors, err)
